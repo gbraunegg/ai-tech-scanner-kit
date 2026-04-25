@@ -267,6 +267,7 @@ async function scrapeReddit(subreddit) {
       url: `https://reddit.com${p.data.permalink}`,
       source: `r/${subreddit}`,
       score: p.data.score || 0,
+      createdAtMs: (p.data.created_utc || 0) * 1000,
     }));
   } catch (e) {
     console.error(`Reddit scrape error for r/${subreddit}: ${e.message}`);
@@ -313,6 +314,7 @@ async function scrapeTwitterAccounts() {
         url: tweet.url || tweet.twitterUrl || tweet.tweetUrl || `https://x.com/${handle}`,
         source: `X/@${handle}`,
         likes: tweet.likeCount || tweet.favorite_count || 0,
+        createdAtMs: tweet.createdAt ? Date.parse(tweet.createdAt) : 0,
       });
     }
   } catch (e) {
@@ -339,6 +341,7 @@ async function scrapeHackerNews() {
           url: hit.url || `https://news.ycombinator.com/item?id=${hit.objectID}`,
           source: 'HackerNews Show HN',
           hnScore: hit.points || 0,
+          createdAtMs: (hit.created_at_i || 0) * 1000,
         });
       }
       await new Promise(r => setTimeout(r, 500));
@@ -511,7 +514,7 @@ function buildWeeklyModelStackSummary(alerts) {
   const today = new Date().toISOString().slice(0, 10);
   const localHits = alerts.filter(a => (a.businessImpact?.localPrivacy || 0) > 0 || /ollama|llama|mlx|gguf|local/i.test(a.text || ''));
   const codingHits = alerts.filter(a => (a.businessImpact?.codingSpeed || 0) > 0 || /coding|agent|codex|claude code/i.test(a.text || ''));
-  const officialHits = alerts.filter(a => /GitHub Releases|News|Blog|OpenAI|Anthropic|Ollama|OpenClaw/i.test(a.source || ''));
+  const officialHits = alerts.filter(a => /GitHub Releases|Anthropic News|OpenAI News|Ollama Blog/i.test(a.source || ''));
   return {
     date: today,
     recommendation: 'Keep GPT-5.5/Codex as primary. Evaluate official SDK/runtime releases immediately; only test local models/tools when they improve coding speed, privacy, or client-dashboard delivery.',
@@ -595,6 +598,10 @@ async function main() {
     // Skip if already seen
     if (state.seenIds.includes(item.id)) continue;
     state.seenIds.push(item.id);
+
+    // Skip stale social/HN items; the cron is for staying current, not rediscovering old launches.
+    const maxAgeMs = item.source?.startsWith('r/') ? 14 * 24 * 60 * 60 * 1000 : 45 * 24 * 60 * 60 * 1000;
+    if (item.createdAtMs && Date.now() - item.createdAtMs > maxAgeMs) continue;
 
     // Must contain at least one signal keyword
     const lower = item.text.toLowerCase();
