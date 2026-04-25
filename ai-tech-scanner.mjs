@@ -24,8 +24,8 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE = process.env.AI_TECH_SCANNER_WORKSPACE || __dirname;
-const STATE_FILE = path.join(WORKSPACE, 'scripts/ai-tech-scanner-state.json');
-const OUTPUT_FILE = path.join(WORKSPACE, 'scripts/ai-tech-scanner-output.json');
+const STATE_FILE = path.join(WORKSPACE, 'ai-tech-scanner-state.json');
+const OUTPUT_FILE = path.join(WORKSPACE, 'ai-tech-scanner-output.json');
 const APIFY_TOKEN_FILE = process.env.APIFY_TOKEN_FILE || path.join(process.env.HOME || '.', '.openclaw/credentials/apify_api_token');
 
 // Twitter accounts to monitor for AI/model releases
@@ -72,7 +72,7 @@ const CHANGELOG_URLS = [
 ];
 
 // Model spec sheet path — living doc that gets updated weekly
-const MODEL_SPEC_FILE = path.join(WORKSPACE, 'memory/reference/model-spec-sheet.md');
+const MODEL_SPEC_FILE = path.join(WORKSPACE, 'model-spec-sheet.md');
 
 // Keywords that signal something worth evaluating
 const SIGNAL_KEYWORDS = [
