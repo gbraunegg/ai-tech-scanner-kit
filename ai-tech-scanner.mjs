@@ -30,12 +30,16 @@ const APIFY_TOKEN_FILE = process.env.APIFY_TOKEN_FILE || path.join(process.env.H
 
 // Twitter accounts to monitor for AI/model releases
 const TWITTER_ACCOUNTS = [
-  { handle: 'thestreamingdev', id: null, focus: 'local models, Mac AI' },
-  { handle: 'karpathy', id: null, focus: 'foundational AI research' },
-  { handle: 'ggerganov', id: null, focus: 'llama.cpp, local inference' },
-  { handle: 'simonw', id: null, focus: 'AI tools, LLM practical use' },
-  { handle: 'swyx', id: null, focus: 'AI engineering, new tools' },
-  { handle: 'mattshumer_', id: null, focus: 'AI products, Claude' },
+  { handle: 'thestreamingdev', focus: 'local models, Mac AI' },
+  { handle: 'karpathy', focus: 'foundational AI research' },
+  { handle: 'ggerganov', focus: 'llama.cpp, local inference' },
+  { handle: 'simonw', focus: 'AI tools, LLM practical use' },
+  { handle: 'swyx', focus: 'AI engineering, new tools' },
+  { handle: 'mattshumer_', focus: 'AI products, Claude' },
+  { handle: 'OpenAI', focus: 'OpenAI releases' },
+  { handle: 'AnthropicAI', focus: 'Anthropic releases' },
+  { handle: 'ollama', focus: 'local model serving' },
+  { handle: 'GoogleDeepMind', focus: 'frontier model research' },
 ];
 
 // Reddit communities to scan
@@ -70,6 +74,22 @@ const CHANGELOG_URLS = [
     stateKey: 'openai_last_item'
   },
 ];
+
+// Official GitHub releases to monitor. These are higher-signal than social feeds.
+const GITHUB_RELEASE_REPOS = [
+  { repo: 'openclaw/openclaw', name: 'OpenClaw GitHub Releases', impact: 'agent platform' },
+  { repo: 'ollama/ollama', name: 'Ollama GitHub Releases', impact: 'local inference' },
+  { repo: 'ggerganov/llama.cpp', name: 'llama.cpp GitHub Releases', impact: 'local inference runtime' },
+  { repo: 'openai/openai-node', name: 'OpenAI SDK Releases', impact: 'OpenAI API integration' },
+  { repo: 'anthropics/anthropic-sdk-typescript', name: 'Anthropic SDK Releases', impact: 'Anthropic API integration' },
+];
+
+const BUSINESS_IMPACT_WEIGHTS = {
+  codingSpeed: ['coding', 'code', 'developer', 'agent', 'codex', 'claude code', 'cursor', 'refactor', 'debug'],
+  localPrivacy: ['local', 'on-device', 'mac', 'mlx', 'ollama', 'llama.cpp', 'gguf', 'privacy', 'offline'],
+  clientDashboardLeverage: ['dashboard', 'analytics', 'reporting', 'workflow', 'automation', 'spreadsheet', 'data pipeline', 'bi'],
+  cpgUseCases: ['cpg', 'retail', 'inventory', 'sales', 'forecast', 'trade spend', 'shopify', 'amazon', 'sku'],
+};
 
 // Model spec sheet path — living doc that gets updated weekly
 const MODEL_SPEC_FILE = path.join(WORKSPACE, 'model-spec-sheet.md');
@@ -113,6 +133,31 @@ const OUR_STACK = {
   usesCases: ['CPG advisory', 'content generation', 'code generation', 'email drafts', 'AI audits', 'client dashboards'],
 };
 
+function scoreBusinessImpact(text) {
+  const lower = text.toLowerCase();
+  const scores = {};
+  for (const [key, terms] of Object.entries(BUSINESS_IMPACT_WEIGHTS)) {
+    scores[key] = terms.reduce((sum, term) => sum + (lower.includes(term) ? 1 : 0), 0);
+  }
+  const total = (scores.codingSpeed * 3) + (scores.localPrivacy * 3) + (scores.clientDashboardLeverage * 2) + (scores.cpgUseCases * 2);
+  const top = Object.entries(scores).sort((a, b) => b[1] - a[1])[0]?.[0] || 'codingSpeed';
+  return { ...scores, total, top };
+}
+
+function summarizeBusinessImpact(impact) {
+  const labels = {
+    codingSpeed: 'coding speed',
+    localPrivacy: 'local privacy',
+    clientDashboardLeverage: 'client dashboard leverage',
+    cpgUseCases: 'CPG use cases',
+  };
+  const ordered = Object.entries(impact)
+    .filter(([k, v]) => ['codingSpeed', 'localPrivacy', 'clientDashboardLeverage', 'cpgUseCases'].includes(k) && v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k]) => labels[k]);
+  return ordered.length ? ordered.slice(0, 2).join(' + ') : 'general AI stack awareness';
+}
+
 // Relevance scoring — how much does this matter for us?
 function scoreRelevance(text, source) {
   let score = 0;
@@ -147,6 +192,9 @@ function scoreRelevance(text, source) {
   // Low value but worth tracking
   if (lower.includes('gemini') || lower.includes('openai') || lower.includes('gpt')) score += 1;
   if (lower.includes('multimodal') || lower.includes('vision')) score += 1;
+
+  // Business impact: reward items that map to revenue-relevant use cases.
+  score += Math.min(5, scoreBusinessImpact(text).total);
 
   // Noise reduction
   if (NOISE_KEYWORDS.some(n => lower.includes(n))) score -= 3;
@@ -227,43 +275,48 @@ async function scrapeReddit(subreddit) {
 }
 
 async function scrapeTwitterAccounts() {
-  // Use Apify tweet-scraper (actor ID: 61RPP7dywgiy0JPD0)
+  // X/Twitter scanning via Apify. Uses the no-minimum "twitter-scraper-lite" actor.
+  // Cost guard: one query, max 40 items, high-signal accounts only.
   if (!existsSync(APIFY_TOKEN_FILE) && !process.env.APIFY_TOKEN) return [];
   const token = process.env.APIFY_TOKEN || readFileSync(APIFY_TOKEN_FILE, 'utf8').trim();
   const results = [];
+  const handles = TWITTER_ACCOUNTS.map(a => `from:${a.handle}`).join(' OR ');
+  const query = `(claude OR gpt OR openai OR anthropic OR ollama OR mlx OR llama.cpp OR agent OR codex OR "Claude Code" OR "model release") (${handles}) -filter:retweets lang:en`;
 
-  // Batch all handles into one Apify run to save credits
-  const handles = TWITTER_ACCOUNTS.map(a => `https://x.com/${a.handle}`);
   try {
-    const url = `https://api.apify.com/v2/acts/61RPP7dywgiy0JPD0/run-sync-get-dataset-items?token=${token}&timeout=60`;
+    const url = `https://api.apify.com/v2/acts/apidojo~twitter-scraper-lite/run-sync-get-dataset-items?token=${token}&timeout=90`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        startUrls: handles.slice(0, 4).map(u => ({ url: u })), // limit to 4 accounts
-        maxTweets: 5,
-        proxyConfig: { useApifyProxy: true },
+        searchTerms: [query],
+        sort: 'Latest',
+        maxItems: 40,
+        tweetLanguage: 'en',
+        includeSearchTerms: false,
       }),
-      signal: AbortSignal.timeout(65000),
+      signal: AbortSignal.timeout(100000),
     });
 
     if (!response.ok) {
-      console.error(`Twitter scrape failed: ${response.status}`);
+      const body = await response.text().catch(() => '');
+      console.error(`X scrape failed: ${response.status} ${body.slice(0, 180)}`);
       return results;
     }
 
     const data = await response.json();
-    for (const tweet of (data || []).slice(0, 20)) {
-      const handle = (tweet.author?.userName || tweet.user?.screen_name || 'unknown').toLowerCase();
+    for (const tweet of (data || []).slice(0, 40)) {
+      const handle = (tweet.author?.userName || tweet.user?.screen_name || tweet.author?.screen_name || 'unknown').toLowerCase();
       results.push({
-        id: `twitter_${handle}_${tweet.id || tweet.tweetId || Date.now()}`,
+        id: `x_${handle}_${tweet.id || tweet.tweetId || tweet.url || Date.now()}`,
         text: tweet.text || tweet.fullText || tweet.content || '',
-        url: tweet.url || tweet.tweetUrl || `https://x.com/${handle}`,
-        source: `@${handle}`,
+        url: tweet.url || tweet.twitterUrl || tweet.tweetUrl || `https://x.com/${handle}`,
+        source: `X/@${handle}`,
+        likes: tweet.likeCount || tweet.favorite_count || 0,
       });
     }
   } catch (e) {
-    console.error(`Twitter batch error: ${e.message}`);
+    console.error(`X batch error: ${e.message}`);
   }
 
   return results;
@@ -296,6 +349,45 @@ async function scrapeHackerNews() {
   return results;
 }
 
+async function checkGitHubReleases(state) {
+  const alerts = [];
+  for (const source of GITHUB_RELEASE_REPOS) {
+    try {
+      const resp = await fetch(`https://api.github.com/repos/${source.repo}/releases?per_page=3`, {
+        headers: { 'User-Agent': 'OpenClaw-AI-Tech-Scanner/1.0', 'Accept': 'application/vnd.github+json' },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!resp.ok) {
+        console.error(`GitHub release check failed for ${source.repo}: ${resp.status}`);
+        continue;
+      }
+      const releases = await resp.json();
+      const latest = (releases || []).find(r => !r.draft) || releases?.[0];
+      if (!latest) continue;
+      const key = `github_${source.repo.replace('/', '_')}_latest`;
+      const fingerprint = `${latest.id || latest.tag_name}:${latest.published_at || latest.created_at}`;
+      const last = state[key] || '';
+      if (fingerprint !== last && last !== '') {
+        const text = `${source.name}: ${latest.name || latest.tag_name} — ${(latest.body || '').replace(/\s+/g, ' ').slice(0, 240)}`;
+        const impact = scoreBusinessImpact(`${text} ${source.impact}`);
+        alerts.push({
+          id: `github_${source.repo}_${latest.id || latest.tag_name}`,
+          text,
+          url: latest.html_url,
+          source: source.name,
+          relevanceScore: 8 + Math.min(5, impact.total),
+          businessImpact: impact,
+          verdict: { action: '🔴 EVALUATE', reason: `Official ${source.name} update. Review for ${source.impact}.` },
+        });
+      }
+      state[key] = fingerprint;
+    } catch (e) {
+      console.error(`GitHub release error for ${source.repo}: ${e.message}`);
+    }
+  }
+  return alerts;
+}
+
 async function checkChangelogs(state) {
   const alerts = [];
   for (const changelog of CHANGELOG_URLS) {
@@ -320,12 +412,15 @@ async function checkChangelogs(state) {
         // Something changed — new content detected
         const newTitles = titles.filter(t => !lastFingerprint.includes(t));
         if (newTitles.length > 0) {
+          const alertText = `NEW from ${changelog.name}: ${newTitles.join(' | ')}`;
+          const impact = scoreBusinessImpact(alertText);
           alerts.push({
             id: `changelog_${changelog.stateKey}_${Date.now()}`,
-            text: `NEW from ${changelog.name}: ${newTitles.join(' | ')}`,
+            text: alertText,
             url: changelog.url,
             source: changelog.name,
-            relevanceScore: 5, // Changelogs from primary tools are always worth flagging
+            relevanceScore: 6 + Math.min(5, impact.total),
+            businessImpact: impact,
             verdict: { action: '🔴 EVALUATE', reason: `${changelog.name} published new content. Review for updates affecting our stack.` }
           });
         }
@@ -349,7 +444,7 @@ async function updateModelSpecSheet() {
 ## Our Primary Stack
 | Role | Model | Where | Cost |
 |---|---|---|---|
-| Main assistant | openai/gpt-5.4 | OpenClaw default agent config | varies |
+| Main assistant | openai-codex/gpt-5.5 | OpenClaw default agent config | varies |
 | Fallback 1 | anthropic/claude-sonnet-4-6 | Anthropic API | ~$3/1M tokens |
 | Fallback 2 | anthropic/claude-haiku-4-5-20251001 | Anthropic API | ~$0.80/1M tokens |
 | Fallback 3 | anthropic/claude-opus-4-6 | Anthropic API | premium |
@@ -399,6 +494,36 @@ async function updateModelSpecSheet() {
   }
 }
 
+function buildTestQueue(alerts) {
+  return alerts
+    .filter(a => /TEST NOW|EVALUATE/.test(a.verdict?.action || ''))
+    .slice(0, 5)
+    .map(a => ({
+      item: a.text.slice(0, 140),
+      source: a.source,
+      url: a.url,
+      why: a.verdict?.reason || 'Potentially relevant',
+      businessImpact: summarizeBusinessImpact(a.businessImpact || scoreBusinessImpact(a.text || '')),
+    }));
+}
+
+function buildWeeklyModelStackSummary(alerts) {
+  const today = new Date().toISOString().slice(0, 10);
+  const localHits = alerts.filter(a => (a.businessImpact?.localPrivacy || 0) > 0 || /ollama|llama|mlx|gguf|local/i.test(a.text || ''));
+  const codingHits = alerts.filter(a => (a.businessImpact?.codingSpeed || 0) > 0 || /coding|agent|codex|claude code/i.test(a.text || ''));
+  const officialHits = alerts.filter(a => /GitHub Releases|News|Blog|OpenAI|Anthropic|Ollama|OpenClaw/i.test(a.source || ''));
+  return {
+    date: today,
+    recommendation: 'Keep GPT-5.5/Codex as primary. Evaluate official SDK/runtime releases immediately; only test local models/tools when they improve coding speed, privacy, or client-dashboard delivery.',
+    watchAreas: [
+      `${officialHits.length} official-source update(s) detected`,
+      `${codingHits.length} coding-agent/tooling candidate(s)`,
+      `${localHits.length} local/privacy candidate(s)`,
+    ],
+    currentStack: OUR_STACK,
+  };
+}
+
 async function main() {
   console.log('AI Tech Scanner running...');
   const state = loadState();
@@ -420,31 +545,40 @@ async function main() {
 
   // Collect all content
   const allItems = [];
+  const sourceStats = { reddit: 0, hackerNews: 0, x: 0, github: 0, changelog: 0 };
 
   // 1. Reddit (fast, reliable)
   for (const sub of SUBREDDITS) {
     const posts = await scrapeReddit(sub.name);
     allItems.push(...posts);
+    sourceStats.reddit += posts.length;
     await new Promise(r => setTimeout(r, 1000));
   }
 
   // 2. HackerNews Show HN (free, no Apify needed)
   const hnItems = await scrapeHackerNews();
   allItems.push(...hnItems);
+  sourceStats.hackerNews = hnItems.length;
 
   // 3. Twitter (slower, may fail — that's OK)
   try {
     const tweets = await scrapeTwitterAccounts();
     allItems.push(...tweets);
+    sourceStats.x = tweets.length;
   } catch (e) {
     console.log('Twitter scrape skipped:', e.message);
   }
 
-  // 4. Changelog monitoring (Anthropic, Ollama, OpenAI)
-  const changelogAlerts = await checkChangelogs(state);
-  // Changelog alerts skip the normal filter and go straight to output
+  // 4. Official GitHub releases
+  const githubAlerts = await checkGitHubReleases(state);
+  sourceStats.github = githubAlerts.length;
 
-  // 5. Update model spec sheet weekly
+  // 5. Changelog monitoring (Anthropic, Ollama, OpenAI)
+  const changelogAlerts = await checkChangelogs(state);
+  sourceStats.changelog = changelogAlerts.length;
+  // Official/changelog alerts skip the normal filter and go straight to output
+
+  // 6. Update model spec sheet weekly
   const lastSpecUpdate = state.lastSpecUpdate || '';
   const scanDate = new Date().toISOString().slice(0, 10);
   const dayOfWeek = new Date().getDay(); // 0=Sunday
@@ -453,7 +587,7 @@ async function main() {
     state.lastSpecUpdate = scanDate;
   }
 
-  console.log(`Collected ${allItems.length} items + ${changelogAlerts.length} changelog alerts`);
+  console.log(`Collected ${allItems.length} items + ${githubAlerts.length} GitHub alerts + ${changelogAlerts.length} changelog alerts`);
 
   // Filter + score
   const alerts = [];
@@ -473,19 +607,23 @@ async function main() {
     if (relevanceScore < 3) continue; // Too low — skip
 
     const verdict = generateVerdict(item.text, relevanceScore);
+    const businessImpact = scoreBusinessImpact(item.text);
 
     alerts.push({
       source: item.source,
       text: item.text.slice(0, 300),
       url: item.url,
       relevanceScore,
+      businessImpact,
+      businessImpactSummary: summarizeBusinessImpact(businessImpact),
       verdict,
     });
   }
 
-  // Add changelog alerts (pre-scored, high priority)
-  alerts.push(...changelogAlerts.filter(a => !state.seenIds.includes(a.id)));
-  for (const a of changelogAlerts) {
+  // Add official/changelog alerts (pre-scored, high priority)
+  const officialAlerts = [...githubAlerts, ...changelogAlerts];
+  alerts.push(...officialAlerts.filter(a => !state.seenIds.includes(a.id)));
+  for (const a of officialAlerts) {
     if (!state.seenIds.includes(a.id)) state.seenIds.push(a.id);
   }
 
@@ -506,7 +644,16 @@ async function main() {
     saveState(state);
   }
 
-  writeFileSync(OUTPUT_FILE, JSON.stringify({ alerts: topAlerts, scannedAt: new Date().toISOString(), stack: OUR_STACK }, null, 2));
+  const weeklyDue = dayOfWeek === 1 || process.env.FORCE_WEEKLY_SUMMARY === '1';
+  const output = {
+    alerts: topAlerts,
+    testQueue: buildTestQueue(topAlerts),
+    weeklyModelStackSummary: weeklyDue ? buildWeeklyModelStackSummary(topAlerts) : null,
+    sourceStats,
+    scannedAt: new Date().toISOString(),
+    stack: OUR_STACK,
+  };
+  writeFileSync(OUTPUT_FILE, JSON.stringify(output, null, 2));
   console.log(`Done. ${topAlerts.length} alerts to post.`);
 }
 

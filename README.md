@@ -1,18 +1,27 @@
 # AI Tech Scanner Kit
 
-Daily scanner for AI/model/tooling updates. It watches Reddit, Hacker News, official changelog pages, and optionally X/Twitter via Apify. It writes actionable alerts to `ai-tech-scanner-output.json` so you can post them to Discord, Slack, email, or any cron runner.
+Daily/weekly scanner for AI model, tooling, agent, local-inference, and automation updates.
 
-## What it is good for
+It watches:
 
-- Staying current on AI model releases and tooling changes
-- Catching Mac/local model improvements
-- Watching Claude/OpenAI/Ollama/OpenClaw-adjacent updates
-- Filtering out low-value AI hype and speculation
+- Official changelog pages: Anthropic, OpenAI, Ollama
+- Official GitHub releases: OpenClaw, Ollama, llama.cpp, OpenAI SDK, Anthropic SDK
+- Hacker News Show HN
+- Reddit AI communities
+- X/Twitter via Apify (`apidojo/twitter-scraper-lite`)
+
+It outputs:
+
+- `alerts` — max 3 high-signal daily items
+- `testQueue` — what to actually install/evaluate
+- `weeklyModelStackSummary` — Monday stack recommendation summary
+- `sourceStats` — proof of what was scanned
+- `stack` — current model/tooling context
 
 ## Requirements
 
 - Node.js 20+
-- Optional: Apify token if you want X/Twitter scraping
+- Optional but recommended: Apify token for X/Twitter scan
 
 ## Quick setup
 
@@ -24,82 +33,77 @@ npm run scan
 cat ai-tech-scanner-output.json
 ```
 
-If you have Apify:
+## Add X/Twitter scanning
+
+Create an Apify account, subscribe to/enable `apidojo/twitter-scraper-lite`, then:
+
+```bash
+export APIFY_TOKEN='apify_api_xxx'
+npm run scan
+```
+
+Or store the token in a file:
 
 ```bash
 mkdir -p ~/.openclaw/credentials
-printf 'YOUR_APIFY_TOKEN' > ~/.openclaw/credentials/apify_api_token
+printf 'apify_api_xxx' > ~/.openclaw/credentials/apify_api_token
 chmod 600 ~/.openclaw/credentials/apify_api_token
 npm run scan
 ```
 
-No Apify is fine — Reddit, HN, and official changelog checks still run.
+Without Apify, the scanner still runs official sources, GitHub releases, HN, and Reddit.
 
-## Cron setup on macOS/Linux
-
-Run daily at 9am:
+## Daily cron
 
 ```bash
 crontab -e
 ```
 
-Add:
-
-```cron
-0 9 * * * cd /path/to/ai-tech-scanner-kit && /usr/local/bin/node ai-tech-scanner.mjs >> scanner.log 2>&1
-```
-
-On Apple Silicon Homebrew, Node may be:
+Apple Silicon/Homebrew Node:
 
 ```cron
 0 9 * * * cd /path/to/ai-tech-scanner-kit && /opt/homebrew/bin/node ai-tech-scanner.mjs >> scanner.log 2>&1
 ```
 
-## Discord posting options
+Intel/Linux Node:
 
-### If using OpenClaw
-
-Create an OpenClaw cron that runs:
-
-```bash
-node /path/to/ai-tech-scanner-kit/ai-tech-scanner.mjs
+```cron
+0 9 * * * cd /path/to/ai-tech-scanner-kit && /usr/local/bin/node ai-tech-scanner.mjs >> scanner.log 2>&1
 ```
 
-Then read `ai-tech-scanner-output.json` and deliver the final assistant response to your Discord channel via cron delivery. Do not rely on an agent calling a message tool.
+## Weekly summary test
 
-### If not using OpenClaw
-
-Use the output JSON with a tiny webhook poster. Example:
+Force weekly summary output:
 
 ```bash
-node ai-tech-scanner.mjs
-node -e '
-const fs=require("fs");
-const out=JSON.parse(fs.readFileSync("ai-tech-scanner-output.json","utf8"));
-if(!out.alerts?.length) process.exit(0);
-const body={content:"**🤖 AI Stack Scan**\n"+out.alerts.map(a=>`**${a.verdict.action}** | ${a.source} | ${a.text.slice(0,180)} | **Why:** ${a.verdict.reason} | ${a.url}`).join("\n\n")};
-fetch(process.env.DISCORD_WEBHOOK_URL,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
-'
+FORCE_WEEKLY_SUMMARY=1 npm run scan
+cat ai-tech-scanner-output.json
 ```
 
-Set your webhook once:
+## Discord webhook example
 
 ```bash
 export DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/...'
+npm run scan
+node -e '
+const fs=require("fs");
+const out=JSON.parse(fs.readFileSync("ai-tech-scanner-output.json","utf8"));
+const parts=[];
+if(out.weeklyModelStackSummary){parts.push("**Weekly Model Stack**\n"+out.weeklyModelStackSummary.recommendation+"\n"+out.weeklyModelStackSummary.watchAreas.join("\n"));}
+if(out.testQueue?.length){parts.push("**Test Queue**\n"+out.testQueue.map((t,i)=>`${i+1}. ${t.item}\n${t.why}\n${t.url}`).join("\n\n"));}
+if(out.alerts?.length){parts.push("**Daily Alerts**\n"+out.alerts.map(a=>`**${a.verdict.action}** ${a.source}: ${a.text}\nImpact: ${a.businessImpactSummary || a.testQueue}\n${a.url}`).join("\n\n"));}
+if(!parts.length) process.exit(0);
+fetch(process.env.DISCORD_WEBHOOK_URL,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({content:parts.join("\n\n")})});
+'
 ```
 
-## Recommended improvements
+## Business impact scoring
 
-1. Add official release feeds first: Anthropic, OpenAI, Google DeepMind, Ollama, llama.cpp, OpenClaw.
-2. Add a weekly model benchmark summary instead of only daily alerts.
-3. Maintain a local `model-spec-sheet.md` with current best model by use case.
-4. Require an action label for every alert: TEST NOW, EVALUATE, MONITOR, FYI.
-5. Filter rumors, subscription chatter, and generic AI takes.
-6. Keep max 3 alerts/day so the channel stays high-signal.
+Every item is scored against:
 
-## Files
+- coding speed
+- local privacy
+- client dashboard leverage
+- CPG use cases
 
-- `ai-tech-scanner.mjs` — scanner
-- `ai-tech-scanner-output.json` — generated output
-- `ai-tech-scanner-state.json` — generated state/deduping
-- `README.md` — setup
+This keeps the scan tied to business value instead of generic AI hype.
