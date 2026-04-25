@@ -1,0 +1,13 @@
+{
+  "name": "ai-tech-scanner-kit",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Daily AI tooling/model scanner for Discord alerts.",
+  "scripts": {
+    "scan": "node ai-tech-scanner.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {}
+}
