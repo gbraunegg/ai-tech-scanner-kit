@@ -28,35 +28,61 @@ const STATE_FILE = path.join(WORKSPACE, 'ai-tech-scanner-state.json');
 const OUTPUT_FILE = path.join(WORKSPACE, 'ai-tech-scanner-output.json');
 const APIFY_TOKEN_FILE = process.env.APIFY_TOKEN_FILE || path.join(process.env.HOME || '.', '.openclaw/credentials/apify_api_token');
 
-// Twitter accounts to monitor for AI/model releases
+// Twitter accounts to monitor for AI/model releases (used in Pass 2 via Apify)
 const TWITTER_ACCOUNTS = [
-  { handle: 'thestreamingdev', focus: 'local models, Mac AI' },
+  { handle: 'AnthropicAI', focus: 'Anthropic releases (primary)' },
+  { handle: 'claude_code', focus: 'Claude Code product updates' },
+  { handle: 'simonw', focus: 'practical LLM tooling, Claude assessments' },
+  { handle: 'swyx', focus: 'AI engineering, agent patterns' },
+  { handle: 'mattshumer_', focus: 'Claude-based products' },
   { handle: 'karpathy', focus: 'foundational AI research' },
-  { handle: 'ggerganov', focus: 'llama.cpp, local inference' },
-  { handle: 'simonw', focus: 'AI tools, LLM practical use' },
-  { handle: 'swyx', focus: 'AI engineering, new tools' },
-  { handle: 'mattshumer_', focus: 'AI products, Claude' },
-  { handle: 'OpenAI', focus: 'OpenAI releases' },
-  { handle: 'AnthropicAI', focus: 'Anthropic releases' },
-  { handle: 'ollama', focus: 'local model serving' },
+  { handle: 'OpenAI', focus: 'OpenAI releases (secondary)' },
   { handle: 'GoogleDeepMind', focus: 'frontier model research' },
 ];
 
 // Reddit communities to scan
 const SUBREDDITS = [
-  { name: 'LocalLLaMA', focus: 'local model releases and benchmarks' },
-  { name: 'MachineLearning', focus: 'new model releases' },
-  { name: 'ClaudeAI', focus: 'Anthropic updates' },
-  { name: 'OpenAI', focus: 'OpenAI releases' },
+  { name: 'ClaudeAI', focus: 'Anthropic updates, Claude Code patterns' },
+  { name: 'AI_Agents', focus: 'agent frameworks and patterns' },
+  { name: 'MachineLearning', focus: 'major model releases (filtered hard)' },
+  { name: 'OpenAI', focus: 'OpenAI releases (secondary)' },
 ];
 
 // HackerNews "Show HN" — builders post new tools here before Twitter
 const HN_QUERIES = [
-  'Show HN: llm', 'Show HN: AI', 'Show HN: claude', 'Show HN: local model',
-  'Show HN: agent', 'Show HN: mac'
+  'Show HN: claude', 'Show HN: agent', 'Show HN: slack',
+  'Show HN: AI', 'Show HN: llm',
 ];
 
-// Changelog sources to monitor (Anthropic, OpenClaw, OpenAI, Ollama)
+// YouTube channels to monitor. Each channel publishes an RSS feed at
+// https://www.youtube.com/feeds/videos.xml?channel_id=UC...
+// Morning session filters out Shorts via title heuristics + judgment.
+const YOUTUBE_CHANNELS = [
+  { channelId: 'UCNJ1Ymd5yFuUPtn21xtRbbw', name: 'AI Explained', focus: 'paper breakdowns, deep AI announcements' },
+  { channelId: 'UCawZsQWqfGSbCI5yjkdVkTA', name: 'Matthew Berman', focus: 'daily AI news roundups, agent demos' },
+  { channelId: 'UC_x36zCEGilGpB1m-V4gmjg', name: 'Indy Dev Dan', focus: 'Claude Code / agent workflow tutorials' },
+  { channelId: 'UC55ODQSvARtgSyc8ThfiepQ', name: 'Sam Witteveen', focus: 'practical agent / LangChain tutorials' },
+  { channelId: 'UCrDwWp7EBBv4NwvScIpBDOA', name: 'Anthropic', focus: 'official Claude launches and demos' },
+  { channelId: 'UCqcbQf6yw5KzRoDDcZ_wBSw', name: 'Wes Roth', focus: 'AI news with depth' },
+  { channelId: 'UCR9j1jqqB5Rse69wjUnbYwA', name: 'All About AI', focus: 'agent tutorials, automation walkthroughs' },
+];
+
+// RSS / Atom feeds — high-signal AI engineering sources.
+// These return structured items so we can pull title + URL + body cleanly.
+const RSS_FEEDS = [
+  {
+    url: 'https://www.latent.space/feed',
+    name: 'Latent Space',
+    focus: 'AI engineering daily digest (swyx + Alessio)',
+  },
+  {
+    url: 'https://simonwillison.net/atom/everything/',
+    name: 'Simon Willison',
+    focus: 'practical LLM tooling, Claude assessments, agent patterns',
+  },
+];
+
+// Changelog sources to monitor (Anthropic primary, OpenAI secondary)
 const CHANGELOG_URLS = [
   {
     url: 'https://www.anthropic.com/news',
@@ -64,9 +90,9 @@ const CHANGELOG_URLS = [
     stateKey: 'anthropic_last_item'
   },
   {
-    url: 'https://ollama.com/blog',
-    name: 'Ollama Blog',
-    stateKey: 'ollama_last_item'
+    url: 'https://docs.claude.com/en/release-notes/claude-code',
+    name: 'Claude Code Release Notes',
+    stateKey: 'claude_code_release_notes'
   },
   {
     url: 'https://openai.com/news/',
@@ -77,18 +103,23 @@ const CHANGELOG_URLS = [
 
 // Official GitHub releases to monitor. These are higher-signal than social feeds.
 const GITHUB_RELEASE_REPOS = [
-  { repo: 'openclaw/openclaw', name: 'OpenClaw GitHub Releases', impact: 'agent platform' },
-  { repo: 'ollama/ollama', name: 'Ollama GitHub Releases', impact: 'local inference' },
-  { repo: 'ggerganov/llama.cpp', name: 'llama.cpp GitHub Releases', impact: 'local inference runtime' },
-  { repo: 'openai/openai-node', name: 'OpenAI SDK Releases', impact: 'OpenAI API integration' },
-  { repo: 'anthropics/anthropic-sdk-typescript', name: 'Anthropic SDK Releases', impact: 'Anthropic API integration' },
+  { repo: 'anthropics/claude-code', name: 'Claude Code GitHub Releases', impact: 'primary CLI' },
+  { repo: 'anthropics/anthropic-sdk-python', name: 'Anthropic Python SDK Releases', impact: 'Python integration' },
+  { repo: 'anthropics/anthropic-sdk-typescript', name: 'Anthropic TS SDK Releases', impact: 'TS integration' },
+  { repo: 'modelcontextprotocol/servers', name: 'MCP Servers Releases', impact: 'tool integrations' },
+  { repo: 'slackapi/bolt-python', name: 'slack-bolt Python Releases', impact: 'Slack bot framework' },
 ];
 
+// Business-impact axes — what actually moves the needle for Xero Solar's agent stack
 const BUSINESS_IMPACT_WEIGHTS = {
-  codingSpeed: ['coding', 'code', 'developer', 'agent', 'codex', 'claude code', 'cursor', 'refactor', 'debug'],
-  localPrivacy: ['local', 'on-device', 'mac', 'mlx', 'ollama', 'llama.cpp', 'gguf', 'privacy', 'offline'],
-  clientDashboardLeverage: ['dashboard', 'analytics', 'reporting', 'workflow', 'automation', 'spreadsheet', 'data pipeline', 'bi'],
-  cpgUseCases: ['cpg', 'retail', 'inventory', 'sales', 'forecast', 'trade spend', 'shopify', 'amazon', 'sku'],
+  // Anything that makes Claude Code / sub-agents / orchestration faster or more reliable
+  agentVelocity: ['claude code', 'sub-agent', 'subagent', 'agent sdk', 'mcp', 'tool use', 'tool call', 'function calling', 'agent', 'orchestrat', 'skill', 'hook'],
+  // Anything that touches the Slack bot framework, Python automation, Excel pipeline
+  pythonAutomation: ['python', 'slack', 'slack-bolt', 'socket mode', 'openpyxl', 'excel', 'pywin32', 'windows', 'pdfplumber', 'automation', 'workflow', 'cron', 'schedul'],
+  // Anything Anthropic-specific (model releases, post-mortems, pricing, API changes)
+  anthropicNews: ['anthropic', 'claude', 'sonnet', 'opus', 'haiku', 'post-mortem', 'postmortem', 'pricing', 'rate limit', 'context window'],
+  // Solar-industry AI tooling — rare but always relevant
+  solarDomain: ['solar', 'photovoltaic', 'pv ', 'nem ', 'tou-', 'utility', 'sce ', 'ladwp', 'tariff', 'energy storage', 'battery'],
 };
 
 // Model spec sheet path — living doc that gets updated weekly
@@ -96,41 +127,68 @@ const MODEL_SPEC_FILE = path.join(WORKSPACE, 'model-spec-sheet.md');
 
 // Keywords that signal something worth evaluating
 const SIGNAL_KEYWORDS = [
-  // Model releases
-  'release', 'launches', 'new model', 'just released', 'now available', 'open source',
-  'llama', 'gemma', 'claude', 'gpt', 'mistral', 'qwen', 'phi', 'deepseek',
-  'ollama', 'llama.cpp', 'gguf', 'mlx', 'quantization',
+  // Anthropic / Claude (primary stack)
+  'claude', 'anthropic', 'sonnet', 'opus', 'haiku', 'claude code',
+  // Releases / changes worth knowing about
+  'release', 'launches', 'new model', 'just released', 'now available',
+  'post-mortem', 'postmortem', 'incident', 'pricing', 'rate limit',
+  // Agent / SDK capability signals
+  'agent', 'agentic', 'sub-agent', 'subagent', 'agent sdk', 'mcp', 'model context protocol',
+  'tool use', 'tool call', 'function calling', 'skill', 'hook', 'orchestrator',
+  // Automation stack relevant to Xero Solar
+  'slack', 'slack-bolt', 'socket mode', 'python', 'openpyxl', 'excel', 'pywin32', 'cron', 'scheduled',
+  // Other models worth tracking (secondary)
+  'gpt', 'gemini', 'deepseek', 'qwen',
   // Capability signals
-  'beats', 'outperforms', 'state of the art', 'sota', 'best', 'faster',
-  'multimodal', 'vision', 'coding', 'agentic', 'tool use', 'function calling',
-  // Mac/local specific
-  'mac mini', 'm4', 'apple silicon', 'metal', 'core ml', 'local', 'on-device',
-  // Tools/APIs
-  'api', 'mcp', 'tool', 'plugin', 'integration', 'workflow', 'automation',
-  'openclaw', 'claude code', 'codex', 'cursor', 'agent',
+  'beats', 'outperforms', 'sota', 'faster', 'cheaper',
+  'multimodal', 'vision', 'coding', 'long context',
 ];
 
 // Keywords that make something likely NOT worth posting (noise filter)
 const NOISE_KEYWORDS = [
+  // Academic / theoretical (not actionable for an internal-tooling shop)
   'papers', 'survey', 'theoretical', 'academic', 'dataset', 'benchmark only',
+  // GPU-only / cloud-only that doesn't apply to a Windows + Claude Code stack
   'requires a100', 'requires h100', 'requires 80gb', 'cloud only',
-  'political', 'layoffs', 'valuation', 'stock', 'ipo',
+  // Mac-only content (George runs Windows, no Mac Mini)
+  'mac mini', 'apple silicon', 'mlx', 'core ml', 'metal performance',
+  // Local-LLM hardware content (no local LLMs in production)
+  'llama.cpp', 'gguf', 'ollama', 'lm studio', 'local model', 'local inference',
+  // Business / political noise
+  'political', 'layoffs', 'valuation', 'stock', 'ipo', 'fundraise',
+  // Speculation / vibes / rumors
   'should i continue', 'subscription', 'rumor', 'leak', 'anyone else',
   'is a decent', 'when will', 'coming or should', 'what do you think',
+  // Beginner Q&A noise (e.g. "How to start with Claude Code", "first things to do")
+  'how to start', 'first things to do', 'recommendations for me',
+  'help me get started', 'best way to learn', 'where do i begin',
+  'how do you learn', 'tips for a beginner', 'just getting started',
+  // Sponsored YouTube content
+  'sign up for free to', 'this video is sponsored', 'try out freebuff',
+  'use code', 'promo code', 'limited time offer', 'affiliate link',
+  // Crypto / NFT / generic AI ethics op-eds
+  'crypto', 'nft', 'web3', 'blockchain', 'token launch',
 ];
 
 // Our current tech stack — used for relevance evaluation
 const OUR_STACK = {
-  primaryModel: 'openai-codex/gpt-5.5',
+  primaryModel: 'anthropic/claude-sonnet (via Claude Code, Max subscription)',
   fallbacks: [
-    'openai/gpt-5.4',
-    'anthropic/claude-sonnet-4-6',
-    'ollama/qwen3.6',
+    'anthropic/claude-opus (architectural decisions)',
+    'anthropic/claude-haiku (cheap lookups)',
   ],
-  localModels: ['ollama/qwen3.6'],
-  macMini: '16GB M4 — can run up to ~26B MoE or ~13B dense models well',
-  tools: ['OpenClaw', 'Codex', 'Claude Code', 'gog (Gmail/Calendar)', 'gh (GitHub)', 'Apify'],
-  usesCases: ['CPG advisory', 'content generation', 'code generation', 'email drafts', 'AI audits', 'client dashboards'],
+  platform: 'Windows 11 Pro — no Mac, no local LLMs in production',
+  language: 'Python 3.11+',
+  tools: ['Claude Code', 'gh (GitHub CLI)', 'slack-bolt (Socket Mode)', 'openpyxl', 'pdfplumber', 'pywin32 (Excel COM)', 'python-dotenv'],
+  agents: [
+    'Procurement Agent (BOM, supplier approvals, catalog)',
+    'Personal Assistant (executive briefings)',
+    'Existing Client Agent (SCE TOU + LADWP R-1A analysis)',
+    'Non Export Agent (battery-only solar valuation)',
+    'Business Development Agent (lead assignment)',
+    'USC + Capstone graders',
+  ],
+  domain: 'Solar industry — TOU rate analysis, NEM, SCE/LADWP, PV systems',
 };
 
 function scoreBusinessImpact(text) {
@@ -139,62 +197,78 @@ function scoreBusinessImpact(text) {
   for (const [key, terms] of Object.entries(BUSINESS_IMPACT_WEIGHTS)) {
     scores[key] = terms.reduce((sum, term) => sum + (lower.includes(term) ? 1 : 0), 0);
   }
-  const total = (scores.codingSpeed * 3) + (scores.localPrivacy * 3) + (scores.clientDashboardLeverage * 2) + (scores.cpgUseCases * 2);
-  const top = Object.entries(scores).sort((a, b) => b[1] - a[1])[0]?.[0] || 'codingSpeed';
+  // Weight: agent velocity + Anthropic news matter most; Python automation is direct-impact;
+  // solar domain is rare-but-always-relevant.
+  const total = (scores.agentVelocity * 3) + (scores.anthropicNews * 3) + (scores.pythonAutomation * 2) + (scores.solarDomain * 4);
+  const top = Object.entries(scores).sort((a, b) => b[1] - a[1])[0]?.[0] || 'agentVelocity';
   return { ...scores, total, top };
 }
 
 function summarizeBusinessImpact(impact) {
   const labels = {
-    codingSpeed: 'coding speed',
-    localPrivacy: 'local privacy',
-    clientDashboardLeverage: 'client dashboard leverage',
-    cpgUseCases: 'CPG use cases',
+    agentVelocity: 'agent / Claude Code velocity',
+    pythonAutomation: 'Python + Slack + Excel automation',
+    anthropicNews: 'Anthropic / Claude news',
+    solarDomain: 'solar industry tooling',
   };
   const ordered = Object.entries(impact)
-    .filter(([k, v]) => ['codingSpeed', 'localPrivacy', 'clientDashboardLeverage', 'cpgUseCases'].includes(k) && v > 0)
+    .filter(([k, v]) => ['agentVelocity', 'pythonAutomation', 'anthropicNews', 'solarDomain'].includes(k) && v > 0)
     .sort((a, b) => b[1] - a[1])
     .map(([k]) => labels[k]);
   return ordered.length ? ordered.slice(0, 2).join(' + ') : 'general AI stack awareness';
 }
 
-// Relevance scoring — how much does this matter for us?
+// Relevance scoring — how much does this matter for George's stack?
 function scoreRelevance(text, source) {
   let score = 0;
   const lower = text.toLowerCase();
-  const officialSource = /Anthropic|OpenAI|Ollama|GitHub|HackerNews/i.test(source || '');
+  const officialSource = /Anthropic|OpenAI|GitHub|HackerNews|Latent Space|Simon Willison|YouTube\//i.test(source || '');
 
   // Official release/changelog sources are more actionable than speculation.
   if (officialSource) score += 2;
 
   // Question/speculation threads are usually noisy unless they include hard release details.
   const speculative = /\b(should i|is .* coming|anyone else|what do you think|rumou?r|leak|subscription)\b/i.test(lower);
-  if (speculative && !/released|launch|available|github|benchmark|paper|repo/i.test(lower)) score -= 4;
+  if (speculative && !/released|launch|available|github|post-mortem|incident|changelog/i.test(lower)) score -= 4;
 
-  // High value: local Mac models
-  if (lower.includes('mac') || lower.includes('apple silicon') || lower.includes('mlx')) score += 3;
-  if (lower.includes('llama.cpp') || lower.includes('ollama') || lower.includes('gguf')) score += 3;
-  if (lower.includes('m4') || lower.includes('m3') || lower.includes('16gb')) score += 2;
-
-  // High value: Claude/Anthropic updates
-  if (lower.includes('claude') || lower.includes('anthropic')) score += 3;
+  // PRIMARY STACK: Anthropic / Claude / Claude Code — top priority
+  if (lower.includes('claude code')) score += 5;
+  if (lower.includes('anthropic') || lower.includes('claude')) score += 3;
+  if (lower.includes('sonnet') || lower.includes('opus') || lower.includes('haiku')) score += 2;
   if (lower.includes('mcp') || lower.includes('model context protocol')) score += 3;
+  if (lower.includes('agent sdk') || lower.includes('sub-agent') || lower.includes('subagent')) score += 3;
+  if (lower.includes('post-mortem') || lower.includes('postmortem') || lower.includes('incident')) score += 4;
 
-  // Medium value: new capable models we could switch to
-  if (lower.includes('new model') || lower.includes('release') || lower.includes('launches')) score += 2;
-  if (lower.includes('coding') || lower.includes('agentic') || lower.includes('tool use')) score += 2;
-  if (lower.includes('faster') || lower.includes('cheaper') || lower.includes('free')) score += 2;
+  // AGENT PATTERNS — orchestration, hooks, skills, scheduled tasks
+  if (lower.includes('orchestrator') || lower.includes('skill') || lower.includes('hook')) score += 2;
+  if (lower.includes('tool use') || lower.includes('tool call') || lower.includes('function calling')) score += 2;
 
-  // Medium value: workflow/automation tools
-  if (lower.includes('workflow') || lower.includes('automation') || lower.includes('agent')) score += 2;
-  if (lower.includes('openclaw') || lower.includes('cursor') || lower.includes('codex')) score += 2;
+  // AUTOMATION STACK — Slack bots, Python, Excel
+  if (lower.includes('slack-bolt') || lower.includes('socket mode')) score += 3;
+  if (lower.includes('slack') && lower.includes('bot')) score += 2;
+  if (lower.includes('python') && (lower.includes('automation') || lower.includes('agent'))) score += 2;
+  if (lower.includes('openpyxl') || lower.includes('pywin32') || lower.includes('excel automation')) score += 3;
+  if (lower.includes('windows') && (lower.includes('python') || lower.includes('agent'))) score += 1;
 
-  // Low value but worth tracking
-  if (lower.includes('gemini') || lower.includes('openai') || lower.includes('gpt')) score += 1;
-  if (lower.includes('multimodal') || lower.includes('vision')) score += 1;
+  // SOLAR DOMAIN — rare but always relevant
+  if (lower.includes('solar') || lower.includes('photovoltaic')) score += 4;
+  if (lower.includes('tou-') || lower.includes('nem 3') || lower.includes('ladwp') || lower.includes('sce ')) score += 4;
 
-  // Business impact: reward items that map to revenue-relevant use cases.
-  score += Math.min(5, scoreBusinessImpact(text).total);
+  // MEDIUM: capability signals, new models worth tracking
+  if (lower.includes('release') || lower.includes('launches') || lower.includes('now available')) score += 2;
+  if (lower.includes('faster') || lower.includes('cheaper') || lower.includes('pricing')) score += 1;
+
+  // LOW: secondary models worth knowing about
+  if (lower.includes('gpt') || lower.includes('openai')) score += 1;
+  if (lower.includes('gemini') || lower.includes('deepseek')) score += 1;
+
+  // Mac / local-LLM / hardware-specific content — actively unhelpful for this stack
+  if (lower.includes('mac mini') || lower.includes('apple silicon') || lower.includes('mlx')) score -= 3;
+  if (lower.includes('llama.cpp') || lower.includes('ollama') || lower.includes('gguf')) score -= 2;
+  if (lower.includes('m4 max') || lower.includes('m3 ultra')) score -= 2;
+
+  // Business-impact axes (already weighted in scoreBusinessImpact)
+  score += Math.min(6, scoreBusinessImpact(text).total);
 
   // Noise reduction
   if (NOISE_KEYWORDS.some(n => lower.includes(n))) score -= 3;
@@ -207,19 +281,24 @@ function generateVerdict(text, score) {
   const lower = text.toLowerCase();
 
   if (score >= 6) {
-    // High relevance — specific recommendation
-    if (lower.includes('mac') && (lower.includes('llama.cpp') || lower.includes('ollama') || lower.includes('mlx'))) {
-      return { action: '🔴 TEST NOW', reason: 'Directly relevant to local model stack. Test on Mac Mini M4.' };
+    if (lower.includes('claude code')) {
+      return { action: '🔴 EVALUATE', reason: 'Directly affects Claude Code — the primary CLI for every Xero Solar agent.' };
     }
-    if (lower.includes('claude') || lower.includes('anthropic') || lower.includes('mcp')) {
-      return { action: '🔴 EVALUATE', reason: 'Directly affects our primary model or tooling.' };
+    if (lower.includes('anthropic') || lower.includes('claude') || lower.includes('mcp')) {
+      return { action: '🔴 EVALUATE', reason: 'Directly affects the Anthropic / Claude stack.' };
     }
-    return { action: '🟡 EVALUATE', reason: 'High relevance to our stack. Worth testing.' };
+    if (lower.includes('slack-bolt') || (lower.includes('slack') && lower.includes('bot'))) {
+      return { action: '🔴 EVALUATE', reason: 'Touches the Slack bot framework used across the agent stack.' };
+    }
+    if (lower.includes('solar') || lower.includes('photovoltaic') || lower.includes('nem ') || lower.includes('ladwp') || lower.includes('sce ')) {
+      return { action: '🔴 EVALUATE', reason: 'Solar industry tooling — rare and directly relevant.' };
+    }
+    return { action: '🟡 EVALUATE', reason: 'High relevance to the stack. Worth a closer look.' };
   }
 
   if (score >= 3) {
-    if (lower.includes('coding') || lower.includes('agent')) {
-      return { action: '🟡 MONITOR', reason: 'Could improve coding workflow. Watch for adoption.' };
+    if (lower.includes('agent') || lower.includes('orchestrat')) {
+      return { action: '🟡 MONITOR', reason: 'Could inform the orchestrator / sub-agent patterns. Watch for adoption.' };
     }
     return { action: '🟡 MONITOR', reason: 'Relevant to our direction. Track for 30 days.' };
   }
@@ -352,12 +431,120 @@ async function scrapeHackerNews() {
   return results;
 }
 
+async function scrapeRssFeeds() {
+  // Pull recent items from RSS/Atom feeds. Zero-dep: regex extraction of
+  // <item>/<entry> blocks. Good enough for Substack and standard atom feeds.
+  const results = [];
+  for (const feed of RSS_FEEDS) {
+    try {
+      const resp = await fetch(feed.url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AI-scanner/1.0)' },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!resp.ok) {
+        console.error(`RSS fetch failed for ${feed.name}: ${resp.status}`);
+        continue;
+      }
+      const xml = await resp.text();
+
+      // Match either <item>...</item> (RSS) or <entry>...</entry> (Atom).
+      const blockRegex = /<(item|entry)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+      let match;
+      let count = 0;
+      while ((match = blockRegex.exec(xml)) !== null && count < 8) {
+        const block = match[2];
+        const title = (block.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '';
+        // Atom uses <link href="..."/>; RSS uses <link>...</link>
+        const linkAttr = (block.match(/<link[^>]*\bhref=["']([^"']+)["'][^>]*\/?>/i) || [])[1];
+        const linkText = (block.match(/<link[^>]*>([^<]+)<\/link>/i) || [])[1];
+        const link = (linkAttr || linkText || '').trim();
+        const description = (block.match(/<description[^>]*>([\s\S]*?)<\/description>/i) || [])[1]
+          || (block.match(/<summary[^>]*>([\s\S]*?)<\/summary>/i) || [])[1]
+          || '';
+        const pubDate = (block.match(/<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i) || [])[1]
+          || (block.match(/<updated[^>]*>([\s\S]*?)<\/updated>/i) || [])[1]
+          || (block.match(/<published[^>]*>([\s\S]*?)<\/published>/i) || [])[1]
+          || '';
+
+        const cleanTitle = title.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]+>/g, '').trim();
+        const cleanDesc = description.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!cleanTitle || !link) continue;
+
+        const idHash = `${feed.name}_${link}`.replace(/[^a-z0-9_]+/gi, '_').slice(0, 120);
+        results.push({
+          id: `rss_${idHash}`,
+          text: `${cleanTitle} — ${cleanDesc.slice(0, 400)}`.trim(),
+          url: link,
+          source: feed.name,
+          createdAtMs: pubDate ? Date.parse(pubDate.trim()) || 0 : 0,
+        });
+        count++;
+      }
+    } catch (e) {
+      console.error(`RSS error for ${feed.name}: ${e.message}`);
+    }
+  }
+  return results;
+}
+
+async function scrapeYouTube() {
+  // Pull the 3 most recent uploads from each curated channel via RSS.
+  // No auth, no API key. Items get kind: 'video' so the morning session
+  // can pull them into their own "Worth Watching" section.
+  const results = [];
+  for (const ch of YOUTUBE_CHANNELS) {
+    try {
+      const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${ch.channelId}`;
+      const resp = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AI-scanner/1.0)' },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!resp.ok) {
+        console.error(`YouTube RSS failed for ${ch.name}: ${resp.status}`);
+        continue;
+      }
+      const xml = await resp.text();
+      const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
+      let m;
+      let count = 0;
+      while ((m = entryRegex.exec(xml)) !== null && count < 3) {
+        const block = m[1];
+        const title = ((block.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || '').trim();
+        const linkAttr = (block.match(/<link\s+rel="alternate"\s+href="([^"]+)"/) || [])[1] || '';
+        const videoId = (block.match(/<yt:videoId>([^<]+)<\/yt:videoId>/) || [])[1] || '';
+        const published = (block.match(/<published>([^<]+)<\/published>/) || [])[1] || '';
+        const description = (block.match(/<media:description>([\s\S]*?)<\/media:description>/) || [])[1] || '';
+        if (!title || !linkAttr) continue;
+
+        // Heuristic: drop obvious Shorts. Hashtag in title or "shorts" in URL path.
+        const lowerTitle = title.toLowerCase();
+        if (lowerTitle.includes('#shorts') || lowerTitle.includes('#short')) continue;
+        if (linkAttr.includes('/shorts/')) continue;
+
+        const cleanDesc = description.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/\s+/g, ' ').trim();
+        results.push({
+          id: `yt_${videoId || ch.channelId}_${Date.parse(published) || Date.now()}`,
+          text: `${title} — ${cleanDesc.slice(0, 400)}`,
+          url: linkAttr,
+          source: `YouTube/${ch.name}`,
+          kind: 'video',
+          createdAtMs: published ? Date.parse(published) || 0 : 0,
+        });
+        count++;
+      }
+    } catch (e) {
+      console.error(`YouTube error for ${ch.name}: ${e.message}`);
+    }
+  }
+  return results;
+}
+
 async function checkGitHubReleases(state) {
   const alerts = [];
   for (const source of GITHUB_RELEASE_REPOS) {
     try {
       const resp = await fetch(`https://api.github.com/repos/${source.repo}/releases?per_page=3`, {
-        headers: { 'User-Agent': 'OpenClaw-AI-Tech-Scanner/1.0', 'Accept': 'application/vnd.github+json' },
+        headers: { 'User-Agent': 'XeroSolar-AI-Tech-Scanner/1.0', 'Accept': 'application/vnd.github+json' },
         signal: AbortSignal.timeout(10000),
       });
       if (!resp.ok) {
@@ -447,46 +634,48 @@ async function updateModelSpecSheet() {
 ## Our Primary Stack
 | Role | Model | Where | Cost |
 |---|---|---|---|
-| Main assistant | openai-codex/gpt-5.5 | OpenClaw default agent config | varies |
-| Fallback 1 | anthropic/claude-sonnet-4-6 | Anthropic API | ~$3/1M tokens |
-| Fallback 2 | anthropic/claude-haiku-4-5-20251001 | Anthropic API | ~$0.80/1M tokens |
-| Fallback 3 | anthropic/claude-opus-4-6 | Anthropic API | premium |
-| Local (planned) | Llama 3.3 70B | Mac mini M4 Pro 48GB | $0 |
+| Default | anthropic/claude-sonnet | Claude Code (Max subscription) | flat-rate |
+| Architectural | anthropic/claude-opus | Claude Code (Max subscription) | flat-rate |
+| Cheap lookups | anthropic/claude-haiku | Claude Code (Max subscription) | flat-rate |
 
-## Mac Mini M4 16GB — What Runs Well
-| Model | Quant | Size | Speed | Quality | Use Case |
-|---|---|---|---|---|---|
-| Gemma 4-26B (MoE) | IQ2_M | 9.3GB | 36 tok/s | Good | Fast general use |
-| Gemma 4-26B (MoE) | Q4_K_M | 16.9GB | 5 tok/s | Better | Quality-sensitive tasks |
-| Llama 3.2 11B | Q4_K_M | 7GB | ~40 tok/s | Good | Fast inference |
-| Phi-4 14B | Q4_K_M | 9GB | ~25 tok/s | Very good | Coding, reasoning |
+## Platform
+- **OS:** Windows 11 Pro
+- **Shell:** PowerShell for startup scripts
+- **Python:** 3.11+ across all agents
+- **Excel automation:** pywin32 (Excel COM) — Procurement, Existing Client agents
+- **Slack framework:** slack-bolt (Socket Mode)
+- **No Mac, no local LLMs in production**
 
-## Mac mini M4 Pro 48GB (Artesian target) — What Runs Well
-| Model | Quant | Size | Speed | Quality | Use Case |
-|---|---|---|---|---|---|
-| Llama 3.3 70B | Q4_K_M | 42GB | ~15 tok/s | Excellent | All tasks, sensitive data |
-| Llama 3.3 70B | IQ2_M | 22GB | ~35 tok/s | Very good | Faster, slightly lower quality |
-| Gemma 4 27B | Q8_0 | 27GB | ~20 tok/s | Excellent | General + coding |
+## Active Agents
+| Agent | Purpose |
+|---|---|
+| Procurement Agent | BOM intake, supplier approvals, catalog management |
+| Personal Assistant | Executive daily briefings, calendar, email triage |
+| Existing Client Agent (SCE) | TOU-D-PRIME / TOU-D-4-9PM performance reviews |
+| Existing Client Agent (LADWP) | R-1A rate analysis |
+| Non Export Agent | Battery-only solar valuation |
+| Business Development Agent | Lead assignment, prospect tracking |
+| USC + Capstone graders | Marshall capstone slide-deck rubric grading |
 
 ## Best Models by Use Case (as of ${today})
-| Use Case | Best Cloud | Best Local (48GB) | Best Local (16GB) |
-|---|---|---|---|
-| Code generation | claude-sonnet-4-6 | Llama 3.3 70B | Phi-4 14B |
-| Long context / docs | gemini-2.5-pro | Llama 3.3 70B | Gemma 4-26B Q4 |
-| Fast chat | claude-haiku | Gemma 4-26B IQ2 | Gemma 4-26B IQ2 |
-| Financial analysis | claude-sonnet-4-6 | Llama 3.3 70B | Llama 3.2 11B |
-| Embeddings | text-embedding-3-small | nomic-embed-text | nomic-embed-text |
+| Use Case | Choice | Why |
+|---|---|---|
+| Code / agent work | claude-sonnet (Claude Code) | Default — Max subscription covers it |
+| Cross-cutting architecture | claude-opus | Higher reasoning, used sparingly |
+| Cheap lookups | claude-haiku | Sub-agent dispatch for trivial reads |
+| Solar telemetry analysis | claude-sonnet | Inline reasoning over Powerhub CSVs |
+| Slack bot conversations | claude-sonnet (via Claude Code session) | Same default, no separate API |
 
 ## Tools to Watch
 | Tool | Status | Relevance |
 |---|---|---|
-| MCP (Model Context Protocol) | Active — Anthropic standard | High — OpenClaw uses this |
-| MLX (Apple) | Active — v0.21+ | High — native Mac acceleration |
-| Ollama | Active — v0.5+ | High — local model serving |
-| llama.cpp | Active | High — GGUF format, MoE support |
-| LM Studio | Active | Medium — local model GUI |
+| Claude Code | Active — primary CLI | High — every agent runs on it |
+| MCP (Model Context Protocol) | Active — Anthropic standard | High — Slack + scheduled-tasks MCPs in use |
+| Anthropic Agent SDK | Active | High — orchestrator + sub-agent patterns |
+| slack-bolt (Python) | Active | High — every Slack bot uses this |
+| openpyxl + pywin32 | Active | High — Excel automation across agents |
 
-*This file is auto-updated weekly. Gherkin reviews scanner output and updates when significant model releases occur.*
+*This file is auto-updated weekly. Edit by hand to add context.*
 `;
 
   try {
@@ -512,12 +701,12 @@ function buildTestQueue(alerts) {
 
 function buildWeeklyModelStackSummary(alerts) {
   const today = new Date().toISOString().slice(0, 10);
-  const localHits = alerts.filter(a => (a.businessImpact?.localPrivacy || 0) > 0 || /ollama|llama|mlx|gguf|local/i.test(a.text || ''));
-  const codingHits = alerts.filter(a => (a.businessImpact?.codingSpeed || 0) > 0 || /coding|agent|codex|claude code/i.test(a.text || ''));
-  const officialHits = alerts.filter(a => /GitHub Releases|Anthropic News|OpenAI News|Ollama Blog/i.test(a.source || ''));
+  const agentHits = alerts.filter(a => (a.businessImpact?.agentVelocity || 0) > 0 || /claude code|sub-agent|mcp|agent sdk/i.test(a.text || ''));
+  const automationHits = alerts.filter(a => (a.businessImpact?.pythonAutomation || 0) > 0 || /slack|python|excel|openpyxl/i.test(a.text || ''));
+  const officialHits = alerts.filter(a => /GitHub Releases|Anthropic News|Claude Code Release Notes|OpenAI News/i.test(a.source || ''));
   return {
     date: today,
-    recommendation: 'Keep GPT-5.5/Codex as primary. Evaluate official SDK/runtime releases immediately; only test local models/tools when they improve coding speed, privacy, or client-dashboard delivery.',
+    recommendation: 'Keep Claude Code (Max subscription) as primary. Evaluate Anthropic releases and Claude Code changelog entries immediately; weigh agent-pattern + Slack-bot tooling against the Procurement / Existing Client / Personal Assistant agents.',
     watchAreas: [
       `${officialHits.length} official-source update(s) detected`,
       `${codingHits.length} coding-agent/tooling candidate(s)`,
@@ -538,7 +727,7 @@ async function main() {
     state.postDate = today;
   }
 
-  const MAX_POSTS_PER_DAY = 3; // Don't spam — max 3 alerts per day
+  const MAX_POSTS_PER_DAY = 5; // Cap re-runs per day
   if (state.postsToday >= MAX_POSTS_PER_DAY) {
     console.log(`Already posted ${state.postsToday} times today. Skipping.`);
     saveState(state);
@@ -548,7 +737,7 @@ async function main() {
 
   // Collect all content
   const allItems = [];
-  const sourceStats = { reddit: 0, hackerNews: 0, x: 0, github: 0, changelog: 0 };
+  const sourceStats = { reddit: 0, hackerNews: 0, x: 0, github: 0, changelog: 0, rss: 0, youtube: 0 };
 
   // 1. Reddit (fast, reliable)
   for (const sub of SUBREDDITS) {
@@ -562,6 +751,16 @@ async function main() {
   const hnItems = await scrapeHackerNews();
   allItems.push(...hnItems);
   sourceStats.hackerNews = hnItems.length;
+
+  // 2b. RSS feeds — Latent Space, Simon Willison
+  const rssItems = await scrapeRssFeeds();
+  allItems.push(...rssItems);
+  sourceStats.rss = rssItems.length;
+
+  // 2c. YouTube — curated channel uploads (full-length only; Shorts filtered)
+  const ytItems = await scrapeYouTube();
+  allItems.push(...ytItems);
+  sourceStats.youtube = ytItems.length;
 
   // 3. Twitter (slower, may fail — that's OK)
   try {
@@ -620,6 +819,7 @@ async function main() {
       source: item.source,
       text: item.text.slice(0, 300),
       url: item.url,
+      kind: item.kind || 'article',
       relevanceScore,
       businessImpact,
       businessImpactSummary: summarizeBusinessImpact(businessImpact),
@@ -634,9 +834,12 @@ async function main() {
     if (!state.seenIds.includes(a.id)) state.seenIds.push(a.id);
   }
 
-  // Sort by relevance, take top 3
+  // Sort by relevance, then split into articles + videos so the morning
+  // session can build the email's "Worth Watching" section separately.
   alerts.sort((a, b) => b.relevanceScore - a.relevanceScore);
-  const topAlerts = alerts.slice(0, 3);
+  const articles = alerts.filter(a => a.kind !== 'video').slice(0, 12);
+  const videos = alerts.filter(a => a.kind === 'video').slice(0, 5);
+  const topAlerts = articles; // backwards compat for state.postsToday counter below
 
   // Trim state.seenIds to last 1000 to avoid unbounded growth
   if (state.seenIds.length > 1000) {
@@ -654,6 +857,7 @@ async function main() {
   const weeklyDue = dayOfWeek === 1 || process.env.FORCE_WEEKLY_SUMMARY === '1';
   const output = {
     alerts: topAlerts,
+    videos,
     testQueue: buildTestQueue(topAlerts),
     weeklyModelStackSummary: weeklyDue ? buildWeeklyModelStackSummary(topAlerts) : null,
     sourceStats,

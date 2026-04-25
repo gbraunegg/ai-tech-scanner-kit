@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 640px; margin: 0 auto; padding: 24px; color: #1d1d1f; line-height: 1.5; background: #fafafa; }
+  .header { border-bottom: 2px solid #0052ff; padding-bottom: 12px; margin-bottom: 24px; }
+  .header h1 { margin: 0 0 4px 0; font-size: 22px; }
+  .header .meta { color: #666; font-size: 13px; }
+  .item { background: #ffffff; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; border: 1px solid #e5e5e7; }
+  .item .tag { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: #0052ff; margin-bottom: 6px; }
+  .item .tag.top { color: #ff3b30; }
+  .item h2 { margin: 0 0 8px 0; font-size: 17px; font-weight: 600; }
+  .item p { margin: 0 0 10px 0; font-size: 15px; color: #333; }
+  .item .source { font-size: 12px; color: #888; }
+  .item a { color: #0052ff; text-decoration: none; font-size: 14px; font-weight: 500; }
+  .item a:hover { text-decoration: underline; }
+  .footer { color: #888; font-size: 12px; text-align: center; margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e5e7; }
+  .filtered { background: #f5f5f7; padding: 12px 16px; border-radius: 8px; font-size: 13px; color: #555; }
+  .filtered .label { font-weight: 600; margin-bottom: 6px; }
+  .filtered .item-line { margin: 4px 0; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>AI Radar — Friday, April 24, 2026</h1>
+  <div class="meta">Daily digest · 2 surfaced · 1 filtered · Sample run</div>
+</div>
+
+<div class="item">
+  <div class="tag top">🔥 Top Story</div>
+  <h2>Claude Code post-mortem published</h2>
+  <p>Anthropic published a post-mortem covering three quality issues that affected Claude Code over the past month — model routing regressions, a tool-use degradation, and a context-window edge case. All three are fixed in v2.1.116+, plus they reset core infrastructure. Worth a one-time read since every agent in the Xero stack runs on Claude Code daily; the post explains what was happening when output quality felt off.</p>
+  <div class="source">Source: r/ClaudeAI · Anthropic engineering team</div>
+  <a href="https://reddit.com/r/ClaudeAI/comments/1stq98j">Read post-mortem →</a>
+</div>
+
+<div class="item">
+  <div class="tag">📈 Also Today</div>
+  <h2>Rapid-MLX — local LLM engine claiming 4.2× faster than Ollama</h2>
+  <p>New open-source inference engine for Apple Silicon that claims a 4.2× speedup over Ollama with full tool-calling support. Compatible with Cursor and Claude Code as a local backend. Only relevant if you're considering a Mac Mini for local inference — your stack is Windows-primary today, so this is a "watch and revisit if local becomes a real option" item rather than something to test now.</p>
+  <div class="source">Source: GitHub · raullenchai/Rapid-MLX</div>
+  <a href="https://github.com/raullenchai/Rapid-MLX">Open repo →</a>
+</div>
+
+<div class="filtered">
+  <div class="label">📝 Filtered today (didn't make the cut)</div>
+  <div class="item-line">• <strong>r/ClaudeAI:</strong> "How to start with Claude Code" — beginner Q&amp;A, not news. Filtered as noise.</div>
+</div>
+
+<div class="footer">
+  Sent by the AI Tech Scanner · Tomorrow's run will use retuned scoring for your stack and the new sources from Pass 1 (Latent Space AINews, simonwillison.net, r/AI_Agents).
+</div>
+
+</body>
+</html>
