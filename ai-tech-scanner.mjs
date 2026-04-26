@@ -65,6 +65,8 @@ const YOUTUBE_CHANNELS = [
   { channelId: 'UCrDwWp7EBBv4NwvScIpBDOA', name: 'Anthropic', focus: 'official Claude launches and demos' },
   { channelId: 'UCqcbQf6yw5KzRoDDcZ_wBSw', name: 'Wes Roth', focus: 'AI news with depth' },
   { channelId: 'UCR9j1jqqB5Rse69wjUnbYwA', name: 'All About AI', focus: 'agent tutorials, automation walkthroughs' },
+  { channelId: 'UCPjNBjflYl0-HQtUvOx0Ibw', name: 'Greg Isenberg', focus: 'AI startup / product ideas, founder interviews, indie hacking' },
+  { channelId: 'UCfQNB91qRP_5ILeu_S_bSkg', name: 'Alex Finn', focus: 'AI tools, prompts, agent demos, vibe coding' },
 ];
 
 // RSS / Atom feeds — high-signal AI engineering sources.
